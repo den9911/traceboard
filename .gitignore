@@ -25,3 +25,9 @@ rustc-ice-*.txt
 
 # Local targets may contain private endpoints
 targets.json
+
+# Runtime history and local secrets
+*.sqlite
+*.sqlite-*
+.env
+.env.*
