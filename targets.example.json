@@ -1,7 +1,14 @@
 {
   "interval_seconds": 60,
   "targets": [
-    { "name": "Example", "url": "https://example.com/" },
-    { "name": "GitHub", "url": "https://github.com/" }
-  ]
+    {
+      "name": "Example",
+      "url": "https://example.com/"
+    },
+    {
+      "name": "GitHub",
+      "url": "https://github.com/"
+    }
+  ],
+  "failure_threshold": 3
 }
