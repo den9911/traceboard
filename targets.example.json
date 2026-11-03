@@ -3,7 +3,12 @@
   "targets": [
     {
       "name": "Example",
-      "url": "https://example.com/"
+      "url": "https://example.com/",
+      "expected_statuses": [
+        200,
+        204
+      ],
+      "latency_warning_ms": 800
     },
     {
       "name": "GitHub",
