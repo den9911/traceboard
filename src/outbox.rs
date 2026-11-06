@@ -72,8 +72,13 @@ fn setup(db: &Connection) -> Result<()> {
     Ok(())
 }
 fn overview(db: &Connection, destination: Option<&str>) -> Result<Overview> {
-    let mut value = Overview { enabled: destination.is_some(), capacity: CAPACITY, ..Default::default() };
-    let mut statement = db.prepare("SELECT state,count(*) FROM notification_outbox GROUP BY state")?;
+    let mut value = Overview {
+        enabled: destination.is_some(),
+        capacity: CAPACITY,
+        ..Default::default()
+    };
+    let mut statement =
+        db.prepare("SELECT state,count(*) FROM notification_outbox GROUP BY state")?;
     for row in statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))? {
         let (state, count) = row?;
         match state.as_str() {
@@ -86,7 +91,11 @@ fn overview(db: &Connection, destination: Option<&str>) -> Result<Overview> {
         }
     }
     value.paused = db.query_row("SELECT count(*) FROM notification_outbox WHERE state='pending' AND (?1 IS NULL OR destination<>?1)", [destination], |r| r.get(0))?;
-    value.overflow = db.query_row("SELECT overflow FROM notification_stats WHERE singleton=1", [], |r| r.get(0))?;
+    value.overflow = db.query_row(
+        "SELECT overflow FROM notification_stats WHERE singleton=1",
+        [],
+        |r| r.get(0),
+    )?;
     Ok(value)
 }
 fn record(db: &mut Connection, entry: Record, destination: Option<&str>) -> Result<()> {
@@ -98,7 +107,8 @@ fn record(db: &mut Connection, entry: Record, destination: Option<&str>) -> Resu
         anyhow::ensure!(text.chars().count() <= 300, "Notification text too long");
         // Only known terminal records are disposable. Unknown deliveries are never retried or pruned automatically.
         tx.execute("DELETE FROM notification_outbox WHERE id IN (SELECT id FROM notification_outbox WHERE state IN ('delivered','failed') ORDER BY id DESC LIMIT -1 OFFSET ?1)", [RETAIN_TERMINAL])?;
-        let mut count: i64 = tx.query_row("SELECT count(*) FROM notification_outbox", [], |r| r.get(0))?;
+        let mut count: i64 =
+            tx.query_row("SELECT count(*) FROM notification_outbox", [], |r| r.get(0))?;
         if count >= CAPACITY {
             count -= tx.execute("DELETE FROM notification_outbox WHERE id=(SELECT id FROM notification_outbox WHERE state IN ('delivered','failed') ORDER BY id LIMIT 1)", [])? as i64;
         }
@@ -113,21 +123,44 @@ fn record(db: &mut Connection, entry: Record, destination: Option<&str>) -> Resu
     Ok(())
 }
 fn claim(db: &mut Connection, destination: Option<&str>, now: i64) -> Result<Option<Delivery>> {
-    let Some(destination) = destination else { return Ok(None); };
+    let Some(destination) = destination else {
+        return Ok(None);
+    };
     let tx = db.transaction()?;
     // FIFO includes the head's cooldown, so recovery cannot overtake its down notification.
+    let sending: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM notification_outbox WHERE state='sending')",
+        [],
+        |r| r.get(0),
+    )?;
+    if sending {
+        return Ok(None);
+    }
     let next = tx.query_row("SELECT id,text,attempts,next_at FROM notification_outbox WHERE state='pending' AND destination=?1 ORDER BY id LIMIT 1", [destination], |r| Ok((r.get::<_, i64>(0)?,r.get::<_, String>(1)?,r.get::<_, u32>(2)?,r.get::<_, i64>(3)?))).optional()?;
-    let Some((id, text, attempts, next_at)) = next else { return Ok(None); };
-    if next_at > now { return Ok(None); }
+    let Some((id, text, attempts, next_at)) = next else {
+        return Ok(None);
+    };
+    if next_at > now {
+        return Ok(None);
+    }
     anyhow::ensure!(attempts < 3, "Invalid notification attempts");
     tx.execute("UPDATE notification_outbox SET state='sending',attempts=attempts+1 WHERE id=?1 AND state='pending'", [id])?;
     tx.commit()?;
-    Ok(Some(Delivery { id, text, attempt: attempts + 1 }))
+    Ok(Some(Delivery {
+        id,
+        text,
+        attempt: attempts + 1,
+    }))
 }
 fn finish(db: &Connection, delivery: &Delivery, outcome: Outcome, now: i64) -> Result<()> {
     let (state, reason, next_at, message_id) = match outcome {
         Outcome::Delivered(id) => ("delivered", None, 0, Some(id)),
-        Outcome::RateLimited(wait) if delivery.attempt < 3 => ("pending", Some("rate_limited"), now.saturating_add(wait.min(3600) as i64), None),
+        Outcome::RateLimited(wait) if delivery.attempt < 3 => (
+            "pending",
+            Some("rate_limited"),
+            now.saturating_add(wait.min(3600) as i64),
+            None,
+        ),
         Outcome::RateLimited(_) => ("failed", Some("retry_exhausted"), 0, None),
         Outcome::Rejected => ("failed", Some("rejected"), 0, None),
         Outcome::Unknown => ("uncertain", Some("unknown_response"), 0, None),
@@ -143,55 +176,106 @@ impl Store {
         let status = Arc::new(RwLock::new(initial));
         let worker_status = status.clone();
         let (sender, mut receiver) = mpsc::channel(WORK_QUEUE);
-        std::thread::Builder::new().name("traceboard-sqlite".into()).spawn(move || {
-            while let Some(job) = receiver.blocking_recv() {
-                match job {
-                    Job::Record(entry, reply) => {
-                        let result = record(&mut db, entry, destination.as_deref());
-                        update_status(&db, destination.as_deref(), &worker_status, result.is_err());
-                        let _ = reply.send(result);
-                    }
-                    Job::Claim(now, reply) => {
-                        let result = claim(&mut db, destination.as_deref(), now);
-                        update_status(&db, destination.as_deref(), &worker_status, result.is_err());
-                        let _ = reply.send(result);
-                    }
-                    Job::Finish(delivery, outcome, now, reply) => {
-                        let result = finish(&db, &delivery, outcome, now);
-                        update_status(&db, destination.as_deref(), &worker_status, result.is_err());
-                        let _ = reply.send(result);
+        std::thread::Builder::new()
+            .name("traceboard-sqlite".into())
+            .spawn(move || {
+                while let Some(job) = receiver.blocking_recv() {
+                    match job {
+                        Job::Record(entry, reply) => {
+                            let result = record(&mut db, entry, destination.as_deref());
+                            update_status(
+                                &db,
+                                destination.as_deref(),
+                                &worker_status,
+                                result.is_err(),
+                            );
+                            let _ = reply.send(result);
+                        }
+                        Job::Claim(now, reply) => {
+                            let result = claim(&mut db, destination.as_deref(), now);
+                            update_status(
+                                &db,
+                                destination.as_deref(),
+                                &worker_status,
+                                result.is_err(),
+                            );
+                            let _ = reply.send(result);
+                        }
+                        Job::Finish(delivery, outcome, now, reply) => {
+                            let result = finish(&db, &delivery, outcome, now);
+                            update_status(
+                                &db,
+                                destination.as_deref(),
+                                &worker_status,
+                                result.is_err(),
+                            );
+                            let _ = reply.send(result);
+                        }
                     }
                 }
-            }
-        })?;
-        Ok(Arc::new(Self { sender, overview: status }))
+            })?;
+        Ok(Arc::new(Self {
+            sender,
+            overview: status,
+        }))
     }
     pub fn status(&self) -> Overview {
-        self.overview.read().map(|s| s.clone()).unwrap_or_else(|_| Overview { storage_error: true, capacity: CAPACITY, ..Default::default() })
+        self.overview
+            .read()
+            .map(|s| s.clone())
+            .unwrap_or_else(|_| Overview {
+                storage_error: true,
+                capacity: CAPACITY,
+                ..Default::default()
+            })
     }
     pub fn stop_sender(&self) {
-        if let Ok(mut status) = self.overview.write() { status.sender_stopped = true; }
+        if let Ok(mut status) = self.overview.write() {
+            status.sender_stopped = true;
+        }
     }
     pub async fn record(&self, url: &str, check: Check, text: Option<String>) -> Result<()> {
         let (reply, result) = oneshot::channel();
-        self.sender.try_send(Job::Record(Record { url:url.into(), check, text }, reply)).map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
+        self.sender
+            .try_send(Job::Record(
+                Record {
+                    url: url.into(),
+                    check,
+                    text,
+                },
+                reply,
+            ))
+            .map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
         result.await.context("Storage worker stopped")?
     }
     pub async fn claim(&self, now: i64) -> Result<Option<Delivery>> {
         let (reply, result) = oneshot::channel();
-        self.sender.try_send(Job::Claim(now, reply)).map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
+        self.sender
+            .try_send(Job::Claim(now, reply))
+            .map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
         result.await.context("Storage worker stopped")?
     }
     pub async fn finish(&self, delivery: Delivery, outcome: Outcome, now: i64) -> Result<()> {
         let (reply, result) = oneshot::channel();
-        self.sender.try_send(Job::Finish(delivery, outcome, now, reply)).map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
+        self.sender
+            .try_send(Job::Finish(delivery, outcome, now, reply))
+            .map_err(|_| anyhow::anyhow!("Storage queue unavailable"))?;
         result.await.context("Storage worker stopped")?
     }
 }
-fn update_status(db: &Connection, destination: Option<&str>, status: &RwLock<Overview>, error: bool) {
+fn update_status(
+    db: &Connection,
+    destination: Option<&str>,
+    status: &RwLock<Overview>,
+    error: bool,
+) {
     if let Ok(mut current) = status.write() {
         match overview(db, destination) {
-            Ok(mut value) => { value.storage_error = error; value.sender_stopped = current.sender_stopped; *current = value; }
+            Ok(mut value) => {
+                value.storage_error = error;
+                value.sender_stopped = current.sender_stopped;
+                *current = value;
+            }
             Err(_) => current.storage_error = true,
         }
     }
@@ -207,20 +291,39 @@ mod tests {
         Ok(db)
     }
     fn entry() -> Record {
-        Record { url:"http://localhost".into(), check:Check { at:chrono::Utc::now(),ok:false,status:Some(500),latency_ms:1,error:None,warning:None },text:Some("outage".into()) }
+        Record {
+            url: "http://localhost".into(),
+            check: Check {
+                at: chrono::Utc::now(),
+                ok: false,
+                status: Some(500),
+                latency_ms: 1,
+                error: None,
+                warning: None,
+            },
+            text: Some("outage".into()),
+        }
     }
     #[test]
     fn check_and_intent_are_atomic_and_bounded() -> Result<()> {
         let mut db = database()?;
         db.execute_batch("CREATE TRIGGER fail_outbox BEFORE INSERT ON notification_outbox BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
         assert!(record(&mut db, entry(), Some("destination")).is_err());
-        assert_eq!(db.query_row("SELECT count(*) FROM checks", [], |r|r.get::<_,i64>(0))?, 0);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM checks", [], |r| r.get::<_, i64>(0))?,
+            0
+        );
         db.execute("DROP TRIGGER fail_outbox", [])?;
-        for _ in 0..CAPACITY+3 { record(&mut db, entry(), Some("destination"))?; }
+        for _ in 0..CAPACITY + 3 {
+            record(&mut db, entry(), Some("destination"))?;
+        }
         let status = overview(&db, Some("destination"))?;
         assert_eq!(status.pending, CAPACITY as u64);
         assert_eq!(status.overflow, 3);
-        assert_eq!(db.query_row("SELECT count(*) FROM checks", [], |r|r.get::<_,i64>(0))?, 120);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM checks", [], |r| r.get::<_, i64>(0))?,
+            120
+        );
         Ok(())
     }
     #[test]
@@ -242,10 +345,11 @@ mod tests {
         record(&mut db, entry(), Some("dest"))?;
         record(&mut db, entry(), Some("dest"))?;
         let first = claim(&mut db, Some("dest"), 0)?.expect("first");
+        assert!(claim(&mut db, Some("dest"), 0)?.is_none());
         finish(&db, &first, Outcome::RateLimited(3), 0)?;
         finish(&db, &first, Outcome::Unknown, 0)?; // Stale completion must not overwrite the retry.
         assert!(claim(&mut db, Some("dest"), 2)?.is_none());
-        for at in [3,6] {
+        for at in [3, 6] {
             let delivery = claim(&mut db, Some("dest"), at)?.expect("retry");
             assert_eq!(delivery.id, first.id);
             finish(&db, &delivery, Outcome::RateLimited(3), at)?;
