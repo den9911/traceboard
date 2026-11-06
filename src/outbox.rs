@@ -220,14 +220,10 @@ impl Store {
         }))
     }
     pub fn status(&self) -> Overview {
-        self.overview
-            .read()
-            .map(|s| s.clone())
-            .unwrap_or_else(|_| Overview {
-                storage_error: true,
-                capacity: CAPACITY,
-                ..Default::default()
-            })
+        let mut value = self.overview.read().map(|s| s.clone()).unwrap_or_default();
+        value.storage_error |= self.sender.is_closed() || self.overview.is_poisoned();
+        value.capacity = CAPACITY;
+        value
     }
     pub fn stop_sender(&self) {
         if let Ok(mut status) = self.overview.write() {
@@ -269,8 +265,9 @@ fn update_status(
     status: &RwLock<Overview>,
     error: bool,
 ) {
+    let updated = overview(db, destination);
     if let Ok(mut current) = status.write() {
-        match overview(db, destination) {
+        match updated {
             Ok(mut value) => {
                 value.storage_error = error;
                 value.sender_stopped = current.sender_stopped;
