@@ -1,8 +1,11 @@
 name: Rust
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -13,7 +16,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           cargo fmt --all
-          cargo clippy --all-targets --all-features
+          git -c color.ui=false diff -- src
+          cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test
       - run: cargo build --release
       - name: Startup diagnostics
@@ -23,3 +27,6 @@ jobs:
       - name: Local HTTP rules
         if: matrix.os == 'ubuntu-latest'
         run: python3 tests/http_rules.py
+      - name: Durable notification outbox with fake Telegram
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 tests/outbox.py
