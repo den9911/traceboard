@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     env,
+    io::Read,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -62,6 +63,21 @@ struct Monitor {
     health: Option<bool>,
 }
 type Monitors = Arc<RwLock<Vec<Monitor>>>;
+const MAX_CONFIG_BYTES: usize = 128 * 1024;
+
+fn read_config(reader: impl Read) -> Result<Config> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_CONFIG_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_CONFIG_BYTES,
+        "Configuration exceeds 128 KiB"
+    );
+    let config = serde_json::from_slice(&bytes)?;
+    validate(&config)?;
+    Ok(config)
+}
 #[derive(Clone)]
 struct App {
     monitors: Monitors,
@@ -87,6 +103,10 @@ fn validate(config: &Config) -> Result<()> {
     );
     let mut urls = std::collections::HashSet::new();
     for t in &config.targets {
+        anyhow::ensure!(
+            t.url.len() <= 2048,
+            "Target URLs must not exceed 2048 bytes"
+        );
         if let Some(codes) = &t.expected_statuses {
             anyhow::ensure!(
                 !codes.is_empty()
@@ -307,11 +327,10 @@ async fn notifications(State(app): State<App>) -> Json<outbox::Overview> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let path = env::var("TRACEBOARD_CONFIG").unwrap_or_else(|_| "targets.json".into());
-    let config: Config =
-        serde_json::from_str(&std::fs::read_to_string(&path).with_context(|| {
-            format!("Cannot read {path}; copy targets.example.json to targets.json")
-        })?)?;
-    validate(&config)?;
+    let file = std::fs::File::open(&path).with_context(|| {
+        format!("Cannot read {path}; copy targets.example.json to targets.json")
+    })?;
+    let config = read_config(file)?;
     let telegram = telegram::Telegram::from_env()?;
     if env::args().any(|a| a == "--check") {
         return startup::check(
@@ -373,6 +392,13 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn configuration_read_is_bounded_before_parsing() {
+        let large = std::io::Cursor::new(vec![b' '; MAX_CONFIG_BYTES + 1]);
+        assert!(read_config(large).is_err());
+        let valid = br#"{"targets":[{"name":"local","url":"http://localhost"}]}"#;
+        assert!(read_config(&valid[..]).is_ok());
+    }
     #[test]
     fn configuration_rejects_bad_targets() {
         let mut c = Config {

@@ -1,6 +1,6 @@
 # Project notes
 
-Traceboard probes 1–25 configured HTTP(S) targets concurrently with a ten-second request timeout, a bounded interval and up to three redirects. The latest 120 checks per URL remain in the existing SQLite checks table. The first check establishes a baseline; failure_threshold retains its existing health policy. No response bodies are saved. The localhost dashboard and manual refresh preserve English/Russian, System/Light/Dark, custom controls and thin themed scrollbars.
+Traceboard probes 1–25 configured HTTP(S) targets concurrently with a ten-second request timeout, a bounded interval and up to three redirects. Configuration is read through a 128 KiB cap; each target URL is limited to 2048 bytes. The latest 120 checks per URL remain in the existing SQLite checks table. The first check establishes a baseline; failure_threshold retains its existing health policy. No response bodies are saved. The localhost dashboard and manual refresh preserve English/Russian, System/Light/Dark, custom controls and thin themed scrollbars.
 
 ## Persistence and notifications
 
