@@ -295,7 +295,9 @@ async fn run_checks(app: &App) {
             });
             if app.store.record(&target.url, check, text).await.is_err() {
                 if !CHECK_WRITE_WARNING.swap(true, Ordering::Relaxed) {
-                    eprintln!("Cannot save check and notification intent; previous history retained");
+                    eprintln!(
+                        "Cannot save check and notification intent; previous history retained"
+                    );
                 }
                 continue;
             }
