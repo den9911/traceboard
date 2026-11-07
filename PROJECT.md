@@ -21,3 +21,9 @@ The delivery panel separates waiting, rejected, unconfirmed, destination-paused,
 TRACEBOARD_TELEGRAM_API is solely a local test fixture override: only a literal loopback HTTP origin is accepted; production uses https://api.telegram.org. tests/outbox.py uses fake credentials and a local fake Bot API, never a real bot. CI also runs startup diagnostics, HTTP-rule regressions and Rust tests on the existing Windows/macOS/Linux matrix. Physical launchers, real Telegram credentials, power loss and screen-reader review are separate manual checks.
 
 Bot API contract reference: https://core.telegram.org/bots/api#making-requests and https://core.telegram.org/bots/api#responseparameters.
+
+## Recovery verification
+
+Whole-second retry deadlines round upward by one second so restart cannot shorten a confirmed retry_after. The overview reports only whitelisted reason counts; an unknown saved reason contributes to other, without exposing its text. check_storage_error follows the most recent check write and is not cleared by unrelated sender polling; sender_stopped stays sticky until restart.
+
+tests/outbox_recovery.py kills the real process during a held fake API request, restarts a persisted cooldown, rejects local delivery confirmation, verifies continued checks and no duplicate sending after restart, forces an atomic intent write failure, then restores storage. A locally seeded 256-record uncertain queue verifies actual overflow/history persistence without flooding any bot. Real credentials, hardware power loss and physical platform launchers remain manual checks.

@@ -13,6 +13,7 @@ const WORK_QUEUE: usize = 32;
 pub struct Overview {
     pub enabled: bool,
     pub storage_error: bool,
+    pub check_storage_error: bool,
     pub sender_stopped: bool,
     pub pending: u64,
     pub sending: u64,
@@ -22,6 +23,16 @@ pub struct Overview {
     pub paused: u64,
     pub overflow: u64,
     pub capacity: i64,
+    pub reasons: Reasons,
+}
+#[derive(Clone, Default, Serialize)]
+pub struct Reasons {
+    pub rate_limited: u64,
+    pub rejected: u64,
+    pub retry_exhausted: u64,
+    pub interrupted: u64,
+    pub unknown_response: u64,
+    pub other: u64,
 }
 #[derive(Clone)]
 pub struct Delivery {
@@ -96,6 +107,18 @@ fn overview(db: &Connection, destination: Option<&str>) -> Result<Overview> {
         [],
         |r| r.get(0),
     )?;
+    let mut statement = db.prepare("SELECT reason,count(*) FROM notification_outbox WHERE reason IS NOT NULL GROUP BY reason")?;
+    for row in statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))? {
+        let (reason, count) = row?;
+        match reason.as_str() {
+            "rate_limited" => value.reasons.rate_limited = count,
+            "rejected" => value.reasons.rejected = count,
+            "retry_exhausted" => value.reasons.retry_exhausted = count,
+            "interrupted" => value.reasons.interrupted = count,
+            "unknown_response" => value.reasons.unknown_response = count,
+            _ => value.reasons.other = value.reasons.other.saturating_add(count),
+        }
+    }
     Ok(value)
 }
 fn record(db: &mut Connection, entry: Record, destination: Option<&str>) -> Result<()> {
@@ -158,7 +181,8 @@ fn finish(db: &Connection, delivery: &Delivery, outcome: Outcome, now: i64) -> R
         Outcome::RateLimited(wait) if delivery.attempt < 3 => (
             "pending",
             Some("rate_limited"),
-            now.saturating_add(wait.min(3600) as i64),
+            // now is in whole seconds. Round upward so restart cannot shorten retry_after.
+            now.saturating_add(wait.min(3600) as i64).saturating_add(1),
             None,
         ),
         Outcome::RateLimited(_) => ("failed", Some("retry_exhausted"), 0, None),
@@ -188,6 +212,7 @@ impl Store {
                                 destination.as_deref(),
                                 &worker_status,
                                 result.is_err(),
+                                true,
                             );
                             let _ = reply.send(result);
                         }
@@ -198,6 +223,7 @@ impl Store {
                                 destination.as_deref(),
                                 &worker_status,
                                 result.is_err(),
+                                false,
                             );
                             let _ = reply.send(result);
                         }
@@ -208,6 +234,7 @@ impl Store {
                                 destination.as_deref(),
                                 &worker_status,
                                 result.is_err(),
+                                false,
                             );
                             let _ = reply.send(result);
                         }
@@ -264,12 +291,14 @@ fn update_status(
     destination: Option<&str>,
     status: &RwLock<Overview>,
     error: bool,
+    record: bool,
 ) {
     let updated = overview(db, destination);
     if let Ok(mut current) = status.write() {
         match updated {
             Ok(mut value) => {
                 value.storage_error = error;
+                value.check_storage_error = if record { error } else { current.check_storage_error };
                 value.sender_stopped = current.sender_stopped;
                 *current = value;
             }
@@ -345,17 +374,17 @@ mod tests {
         assert!(claim(&mut db, Some("dest"), 0)?.is_none());
         finish(&db, &first, Outcome::RateLimited(3), 0)?;
         finish(&db, &first, Outcome::Unknown, 0)?; // Stale completion must not overwrite the retry.
-        assert!(claim(&mut db, Some("dest"), 2)?.is_none());
-        for at in [3, 6] {
+        assert!(claim(&mut db, Some("dest"), 3)?.is_none());
+        for at in [4, 8] {
             let delivery = claim(&mut db, Some("dest"), at)?.expect("retry");
             assert_eq!(delivery.id, first.id);
             finish(&db, &delivery, Outcome::RateLimited(3), at)?;
         }
         assert_eq!(overview(&db, Some("dest"))?.failed, 1);
-        let second = claim(&mut db, Some("dest"), 7)?.expect("next event");
+        let second = claim(&mut db, Some("dest"), 9)?.expect("next event");
         assert_ne!(second.id, first.id);
-        finish(&db, &second, Outcome::Delivered(12), 7)?;
-        assert!(claim(&mut db, Some("dest"), 8)?.is_none());
+        finish(&db, &second, Outcome::Delivered(12), 9)?;
+        assert!(claim(&mut db, Some("dest"), 10)?.is_none());
         Ok(())
     }
 }
