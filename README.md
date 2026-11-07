@@ -12,7 +12,7 @@ A compact local dashboard for checking websites and APIs. Rust performs the chec
 
 1. Install [Rust and Cargo](https://rustup.rs/).
 2. Copy `targets.example.json` to `targets.json` and edit the service names and URLs. Set an interval between 15 and 3600 seconds. Configuration is limited to 128 KiB and each target URL to 2048 bytes.
-3. Run `cargo run --release` and open <http://127.0.0.1:3000>. On Windows you can use `run.bat`; on macOS run `sh run.command` in Terminal. The launchers create `targets.json` from the example if needed.
+3. Run `cargo run --release` and open <http://127.0.0.1:3000>. On Windows you can use `run.bat`; on macOS run `sh run.command` in Terminal. The launchers create `targets.json` from the example if needed. After the server prints its address, open that URL in your browser.
 
 The server listens on localhost only. Stop it with Ctrl+C. Restart after editing targets. Each check uses HTTP GET, follows up to three redirects and succeeds on a 2xx response. History is persisted in `traceboard.sqlite` (or the path in `TRACEBOARD_DB`) and retains the latest 120 checks per URL. The percentage is based on these samples, not a guaranteed uptime figure.
 
@@ -28,7 +28,7 @@ Create a bot with [@BotFather](https://t.me/BotFather), start it in the destinat
 
 > Ранняя версия: отправка в Telegram с настоящим ботом пока не проверена. Обложка — иллюстрация, не скриншот приложения.
 
-Установите [Rust и Cargo](https://rustup.rs/), скопируйте `targets.example.json` в `targets.json` и укажите адреса. Запустите `cargo run --release` и откройте <http://127.0.0.1:3000>. Для Windows есть `run.bat`, для macOS — `sh run.command`; они создадут файл настроек из примера, если его нет.
+Установите [Rust и Cargo](https://rustup.rs/), скопируйте `targets.example.json` в `targets.json` и укажите адреса. Запустите `cargo run --release` и откройте <http://127.0.0.1:3000>. Для Windows есть `run.bat`, для macOS — `sh run.command`; они создадут файл настроек из примера, если его нет. Когда сервер выведет адрес, откройте его в браузере.
 
 Интервал задаётся от 15 до 3600 секунд. Размер конфигурации — до 128 KiB, URL — до 2048 байт. После изменения настроек перезапустите приложение. Успешным считается ответ HTTP 2xx; история хранится в `traceboard.sqlite` (путь можно задать через `TRACEBOARD_DB`), до 120 проверок на адрес. Процент рассчитан только по этим проверкам. Для уведомлений задайте в терминале `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` до запуска. Создайте бота через @BotFather и сначала напишите ему в нужном чате. Уведомления отправляются при изменении состояния; первая проверка задаёт исходное состояние. Событие уведомления сохраняется в ограниченной SQLite-очереди вместе с проверкой. Панель показывает ожидание, доставку, отказ, неизвестный исход и переполнение. До трёх попыток разрешены только после явного отказа из-за лимита запросов; неизвестная доставка не повторяется вслепую. Настройка `failure_threshold` задаёт число неудачных проверок подряд для перехода в состояние ошибки (по умолчанию 3). Сервер доступен только на локальном компьютере.
 
