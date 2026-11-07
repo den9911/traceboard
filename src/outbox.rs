@@ -107,7 +107,9 @@ fn overview(db: &Connection, destination: Option<&str>) -> Result<Overview> {
         [],
         |r| r.get(0),
     )?;
-    let mut statement = db.prepare("SELECT reason,count(*) FROM notification_outbox WHERE reason IS NOT NULL GROUP BY reason")?;
+    let mut statement = db.prepare(
+        "SELECT reason,count(*) FROM notification_outbox WHERE reason IS NOT NULL GROUP BY reason",
+    )?;
     for row in statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))? {
         let (reason, count) = row?;
         match reason.as_str() {
@@ -298,7 +300,11 @@ fn update_status(
         match updated {
             Ok(mut value) => {
                 value.storage_error = error;
-                value.check_storage_error = if record { error } else { current.check_storage_error };
+                value.check_storage_error = if record {
+                    error
+                } else {
+                    current.check_storage_error
+                };
                 value.sender_stopped = current.sender_stopped;
                 *current = value;
             }

@@ -18,10 +18,14 @@ use std::{
     env,
     io::Read,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::RwLock;
+static CHECK_WRITE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Deserialize, Default)]
 struct Target {
@@ -290,7 +294,9 @@ async fn run_checks(app: &App) {
                 )
             });
             if app.store.record(&target.url, check, text).await.is_err() {
-                eprintln!("Cannot save check and notification intent; previous history retained");
+                if !CHECK_WRITE_WARNING.swap(true, Ordering::Relaxed) {
+                    eprintln!("Cannot save check and notification intent; previous history retained");
+                }
                 continue;
             }
             if let Some(current) = app.monitors.write().await.get_mut(i) {

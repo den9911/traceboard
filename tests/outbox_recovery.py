@@ -114,6 +114,8 @@ with tempfile.TemporaryDirectory(prefix='outbox recovery ') as directory:
         wait(lambda:overview()['check_storage_error'])
         time.sleep(1.2)
         assert count(db)==before and overview()['check_storage_error']
+        refresh();refresh()
+        assert count(db)==before
         assert get('/api/monitors')[0]['history'][-1]['status']==500
         with sqlite3.connect(db) as conn:conn.execute('DROP TRIGGER reject_intent')
         refresh();wait(lambda:not overview()['check_storage_error'])
@@ -139,6 +141,7 @@ with tempfile.TemporaryDirectory(prefix='outbox recovery ') as directory:
         public=json.dumps(overview())
         for secret in ['private service','fixture-token','private-chat','fixture-private-reason',str(db)]:assert secret not in public
         output.flush();logs=log.read_text()
+        assert logs.count('Cannot save check and notification intent')==1
         for secret in ['fixture-token','private-chat','private completion fixture','private record fixture']:assert secret not in logs
     finally:
         gate.set()

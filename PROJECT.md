@@ -24,6 +24,6 @@ Bot API contract reference: https://core.telegram.org/bots/api#making-requests a
 
 ## Recovery verification
 
-Whole-second retry deadlines round upward by one second so restart cannot shorten a confirmed retry_after. The overview reports only whitelisted reason counts; an unknown saved reason contributes to other, without exposing its text. check_storage_error follows the most recent check write and is not cleared by unrelated sender polling; sender_stopped stays sticky until restart.
+Whole-second retry deadlines round upward by one second so restart cannot shorten a confirmed retry_after. The overview reports only whitelisted reason counts; an unknown saved reason contributes to other, without exposing its text. The fixed check-write stderr warning is emitted at most once per process; current failures remain visible in the overview. check_storage_error follows the most recent check write and is not cleared by unrelated sender polling; sender_stopped stays sticky until restart.
 
 tests/outbox_recovery.py kills the real process during a held fake API request, restarts a persisted cooldown, rejects local delivery confirmation, verifies continued checks and no duplicate sending after restart, forces an atomic intent write failure, then restores storage. A locally seeded 256-record uncertain queue verifies actual overflow/history persistence without flooding any bot. Real credentials, hardware power loss and physical platform launchers remain manual checks.
